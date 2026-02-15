@@ -100,6 +100,8 @@ export async function runAgentTurnWithFallback(params: {
   let fallbackModel = params.followupRun.run.model;
   let didResetAfterCompactionFailure = false;
   let didRetryTransientHttpError = false;
+  let didRetryThinkingOnly = false;
+  let effectiveCommandBody = params.commandBody;
 
   while (true) {
     try {
@@ -191,7 +193,7 @@ export async function runAgentTurnWithFallback(params: {
                   sessionFile: params.followupRun.run.sessionFile,
                   workspaceDir: params.followupRun.run.workspaceDir,
                   config: params.followupRun.run.config,
-                  prompt: params.commandBody,
+                  prompt: effectiveCommandBody,
                   provider,
                   model,
                   thinkLevel: params.followupRun.run.thinkLevel,
@@ -289,7 +291,7 @@ export async function runAgentTurnWithFallback(params: {
             agentDir: params.followupRun.run.agentDir,
             config: params.followupRun.run.config,
             skillsSnapshot: params.followupRun.run.skillsSnapshot,
-            prompt: params.commandBody,
+            prompt: effectiveCommandBody,
             extraSystemPrompt: params.followupRun.run.extraSystemPrompt,
             ownerNumbers: params.followupRun.run.ownerNumbers,
             enforceFinalTag: resolveEnforceFinalTag(params.followupRun.run, provider),
@@ -506,6 +508,14 @@ export async function runAgentTurnWithFallback(params: {
             },
           };
         }
+      }
+
+      // Plugin-requested continuation (e.g. thinking-only stop recovery).
+      // Retry once with the plugin-provided prompt.
+      if (runResult.requestContinue && !didRetryThinkingOnly) {
+        didRetryThinkingOnly = true;
+        effectiveCommandBody = runResult.requestContinue;
+        continue;
       }
 
       break;

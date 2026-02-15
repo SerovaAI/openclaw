@@ -802,6 +802,7 @@ export async function runEmbeddedAttempt(
 
       let messagesSnapshot: AgentMessage[] = [];
       let sessionIdUsed = activeSession.sessionId;
+      let agentEndResult: { requestContinue?: string } | undefined;
       const onAbort = () => {
         const reason = params.abortSignal ? getAbortReason(params.abortSignal) : undefined;
         const timeout = reason ? isTimeoutError(reason) : false;
@@ -1036,12 +1037,19 @@ export async function runEmbeddedAttempt(
         });
         anthropicPayloadLogger?.recordUsage(messagesSnapshot, promptError);
 
-        // Run agent_end hooks to allow plugins to analyze the conversation
-        // This is fire-and-forget, so we don't await
-        // Run even on compaction timeout so plugins can log/cleanup
+        // Clear timers before running hooks — the abort timer covers model/tool
+        // execution only, not plugin post-processing.
+        clearTimeout(abortTimer);
+        if (abortWarnTimer) {
+          clearTimeout(abortWarnTimer);
+        }
+
+        // Run agent_end hooks to allow plugins to analyze the conversation.
+        // Awaited so plugins can return requestContinue for thinking-only recovery.
+        // Run even on compaction timeout so plugins can log/cleanup.
         if (hookRunner?.hasHooks("agent_end")) {
-          hookRunner
-            .runAgentEnd(
+          try {
+            agentEndResult = await hookRunner.runAgentEnd(
               {
                 messages: messagesSnapshot,
                 success: !aborted && !promptError,
@@ -1055,16 +1063,12 @@ export async function runEmbeddedAttempt(
                 workspaceDir: params.workspaceDir,
                 messageProvider: params.messageProvider ?? undefined,
               },
-            )
-            .catch((err) => {
-              log.warn(`agent_end hook failed: ${err}`);
-            });
+            );
+          } catch (err) {
+            log.warn(`agent_end hook failed: ${String(err)}`);
+          }
         }
       } finally {
-        clearTimeout(abortTimer);
-        if (abortWarnTimer) {
-          clearTimeout(abortWarnTimer);
-        }
         if (!isProbeSession && (aborted || timedOut) && !timedOutDuringCompaction) {
           log.debug(
             `run cleanup: runId=${params.runId} sessionId=${params.sessionId} aborted=${aborted} timedOut=${timedOut}`,
@@ -1118,6 +1122,8 @@ export async function runEmbeddedAttempt(
         compactionCount: getCompactionCount(),
         // Client tool call detected (OpenResponses hosted tools)
         clientToolCall: clientToolCallDetected ?? undefined,
+        // Plugin-requested continuation (e.g. thinking-only stop recovery)
+        requestContinue: agentEndResult?.requestContinue,
       };
     } finally {
       // Always tear down the session (and release the lock) before we leave this attempt.

@@ -65,6 +65,10 @@ export type EmbeddedPiRunResult = {
   messagingToolSentTexts?: string[];
   // Messaging tool targets that successfully sent a message during the run.
   messagingToolSentTargets?: MessagingToolSend[];
+  /** Set by agent_end hooks when a plugin requests an immediate retry
+   *  (e.g. after a thinking-only stop). The string is used as the prompt
+   *  for the continuation run. */
+  requestContinue?: string;
 };
 
 export type EmbeddedPiCompactResult = {

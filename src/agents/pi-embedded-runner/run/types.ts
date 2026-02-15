@@ -48,4 +48,6 @@ export type EmbeddedRunAttemptResult = {
   compactionCount?: number;
   /** Client tool call detected (OpenResponses hosted tools). */
   clientToolCall?: { name: string; params: Record<string, unknown> };
+  /** Plugin-requested continuation prompt (e.g. thinking-only stop recovery). */
+  requestContinue?: string;
 };

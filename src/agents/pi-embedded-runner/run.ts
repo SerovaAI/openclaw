@@ -945,6 +945,11 @@ export async function runEmbeddedPiAgent(
             didSendViaMessagingTool: attempt.didSendViaMessagingTool,
             messagingToolSentTexts: attempt.messagingToolSentTexts,
             messagingToolSentTargets: attempt.messagingToolSentTargets,
+            // Pass through plugin-requested continuation.
+            // No payloads guard: in multi-turn runs with block streaming, earlier-turn
+            // text accumulates in payloads even though it was already delivered to the
+            // user — that must not suppress thinking-only stop recovery.
+            requestContinue: attempt.requestContinue,
           };
         }
       } finally {

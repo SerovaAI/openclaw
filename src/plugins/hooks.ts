@@ -11,6 +11,7 @@ import type {
   PluginHookAfterToolCallEvent,
   PluginHookAgentContext,
   PluginHookAgentEndEvent,
+  PluginHookAgentEndResult,
   PluginHookBeforeAgentStartEvent,
   PluginHookBeforeAgentStartResult,
   PluginHookBeforeCompactionEvent,
@@ -42,6 +43,7 @@ export type {
   PluginHookBeforeAgentStartEvent,
   PluginHookBeforeAgentStartResult,
   PluginHookAgentEndEvent,
+  PluginHookAgentEndResult,
   PluginHookBeforeCompactionEvent,
   PluginHookBeforeResetEvent,
   PluginHookAfterCompactionEvent,
@@ -203,13 +205,21 @@ export function createHookRunner(registry: PluginRegistry, options: HookRunnerOp
   /**
    * Run agent_end hook.
    * Allows plugins to analyze completed conversations.
-   * Runs in parallel (fire-and-forget).
+   * Handlers run sequentially; the first `requestContinue` wins
+   * (highest-priority hook takes precedence).
    */
   async function runAgentEnd(
     event: PluginHookAgentEndEvent,
     ctx: PluginHookAgentContext,
-  ): Promise<void> {
-    return runVoidHook("agent_end", event, ctx);
+  ): Promise<PluginHookAgentEndResult | undefined> {
+    return runModifyingHook<"agent_end", PluginHookAgentEndResult>(
+      "agent_end",
+      event,
+      ctx,
+      (acc, next) => ({
+        requestContinue: acc?.requestContinue ?? next.requestContinue,
+      }),
+    );
   }
 
   /**

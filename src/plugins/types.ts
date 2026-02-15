@@ -340,6 +340,11 @@ export type PluginHookAgentEndEvent = {
   durationMs?: number;
 };
 
+export type PluginHookAgentEndResult = {
+  /** If set, the agent runner will re-run with this text as the user prompt. */
+  requestContinue?: string;
+};
+
 // Compaction hooks
 export type PluginHookBeforeCompactionEvent = {
   /** Total messages in the session before any truncation or compaction */
@@ -498,7 +503,10 @@ export type PluginHookHandlerMap = {
     event: PluginHookBeforeAgentStartEvent,
     ctx: PluginHookAgentContext,
   ) => Promise<PluginHookBeforeAgentStartResult | void> | PluginHookBeforeAgentStartResult | void;
-  agent_end: (event: PluginHookAgentEndEvent, ctx: PluginHookAgentContext) => Promise<void> | void;
+  agent_end: (
+    event: PluginHookAgentEndEvent,
+    ctx: PluginHookAgentContext,
+  ) => Promise<PluginHookAgentEndResult | void> | PluginHookAgentEndResult | void;
   before_compaction: (
     event: PluginHookBeforeCompactionEvent,
     ctx: PluginHookAgentContext,
