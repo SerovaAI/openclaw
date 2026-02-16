@@ -411,6 +411,7 @@ export async function runEmbeddedPiAgent(
       const MAX_OVERFLOW_COMPACTION_ATTEMPTS = 3;
       let overflowCompactionAttempts = 0;
       let toolResultTruncationAttempted = false;
+      let didRetryThinkingOnly = false;
       const usageAccumulator = createUsageAccumulator();
       let lastRunPromptUsage: ReturnType<typeof normalizeUsage> | undefined;
       let autoCompactionCount = 0;
@@ -947,6 +948,24 @@ export async function runEmbeddedPiAgent(
               messagingToolSentTexts: attempt.messagingToolSentTexts,
               messagingToolSentTargets: attempt.messagingToolSentTargets,
             };
+          }
+
+          // Retry once if the attempt produced only thinking tokens (no visible
+          // output). The thinking-only message has already been pruned from the
+          // session in attempt.ts, so a retry starts with a clean context.
+          if (
+            !timedOut &&
+            !aborted &&
+            payloads.length === 0 &&
+            attempt.thinkingOnlyPruned &&
+            !didRetryThinkingOnly
+          ) {
+            didRetryThinkingOnly = true;
+            log.warn(
+              `Thinking-only stop detected, retrying attempt. ` +
+                `runId=${params.runId} sessionId=${params.sessionId}`,
+            );
+            continue;
           }
 
           log.debug(

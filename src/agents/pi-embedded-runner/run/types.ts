@@ -48,4 +48,6 @@ export type EmbeddedRunAttemptResult = {
   compactionCount?: number;
   /** Client tool call detected (OpenResponses hosted tools). */
   clientToolCall?: { name: string; params: Record<string, unknown> };
+  /** True if a thinking-only assistant message was detected and pruned from session. */
+  thinkingOnlyPruned?: boolean;
 };

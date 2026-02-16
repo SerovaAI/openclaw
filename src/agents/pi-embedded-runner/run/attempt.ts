@@ -149,6 +149,38 @@ export function injectHistoryImagesIntoMessages(
   return didMutate;
 }
 
+/**
+ * Returns true when an assistant message contains only thinking blocks
+ * (no text, no tool calls). These occur when the model reasons internally
+ * but produces no visible output, e.g. due to provider-level thinking
+ * that wasn't suppressed.
+ */
+function isThinkingOnlyAssistant(msg: { content?: unknown }): boolean {
+  if (!Array.isArray(msg.content) || msg.content.length === 0) {
+    return false;
+  }
+  const rec = (b: unknown) => b as Record<string, unknown> | null;
+  const hasThinking = msg.content.some(
+    (b: unknown) => {
+      const r = rec(b);
+      return r?.type === "thinking" && typeof r.thinking === "string" && r.thinking.trim().length > 0;
+    },
+  );
+  const hasText = msg.content.some(
+    (b: unknown) => {
+      const r = rec(b);
+      return r?.type === "text" && typeof r.text === "string" && r.text.trim().length > 0;
+    },
+  );
+  const hasToolCall = msg.content.some(
+    (b: unknown) => {
+      const r = rec(b);
+      return r?.type === "toolCall" || r?.type === "tool_use";
+    },
+  );
+  return hasThinking && !hasText && !hasToolCall;
+}
+
 function summarizeMessagePayload(msg: AgentMessage): { textChars: number; imageBlocks: number } {
   const content = (msg as { content?: unknown }).content;
   if (typeof content === "string") {
@@ -809,6 +841,7 @@ export async function runEmbeddedAttempt(
 
       let messagesSnapshot: AgentMessage[] = [];
       let sessionIdUsed = activeSession.sessionId;
+      let thinkingOnlyPruned = false;
       const onAbort = () => {
         const reason = params.abortSignal ? getAbortReason(params.abortSignal) : undefined;
         const timeout = reason ? isTimeoutError(reason) : false;
@@ -1069,6 +1102,40 @@ export async function runEmbeddedAttempt(
         });
         anthropicPayloadLogger?.recordUsage(messagesSnapshot, promptError);
 
+        // Detect thinking-only assistant messages: the model produced reasoning
+        // tokens but no visible text. Branch past the message so it doesn't
+        // pollute the session for the next turn (thinking token leakage).
+        if (
+          !promptError &&
+          !aborted &&
+          !timedOutDuringCompaction &&
+          sessionManager
+        ) {
+          const leafEntry = sessionManager.getLeafEntry();
+          if (
+            leafEntry?.type === "message" &&
+            leafEntry.message.role === "assistant" &&
+            isThinkingOnlyAssistant(leafEntry.message)
+          ) {
+            if (leafEntry.parentId) {
+              sessionManager.branch(leafEntry.parentId);
+            } else {
+              sessionManager.resetLeaf();
+            }
+            const sessionContext = sessionManager.buildSessionContext();
+            const sanitized = transcriptPolicy.normalizeAntigravityThinkingBlocks
+              ? sanitizeAntigravityThinkingBlocks(sessionContext.messages)
+              : sessionContext.messages;
+            activeSession.agent.replaceMessages(sanitized);
+            messagesSnapshot = sanitized.slice();
+            thinkingOnlyPruned = true;
+            log.warn(
+              `Removed thinking-only assistant message to prevent token leakage. ` +
+                `runId=${params.runId} sessionId=${params.sessionId}`,
+            );
+          }
+        }
+
         // Run agent_end hooks to allow plugins to analyze the conversation
         // This is fire-and-forget, so we don't await
         // Run even on compaction timeout so plugins can log/cleanup
@@ -1176,6 +1243,7 @@ export async function runEmbeddedAttempt(
         compactionCount: getCompactionCount(),
         // Client tool call detected (OpenResponses hosted tools)
         clientToolCall: clientToolCallDetected ?? undefined,
+        thinkingOnlyPruned: thinkingOnlyPruned || undefined,
       };
     } finally {
       // Always tear down the session (and release the lock) before we leave this attempt.
